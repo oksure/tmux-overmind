@@ -1,171 +1,158 @@
 # tmux-overmind
 
-An overarching monitor for interactive AI CLI agents running inside Tmux panes. Detects their state (Running vs. Waiting vs. Idle), provides a compact status indicator, an fzf-based dashboard, and quick-jump functionality.
+**One character in your status bar tells you which AI agents need attention.**
 
-## Features
+If you run multiple AI coding agents (Claude Code, Gemini CLI, OpenCode, Codex, Copilot, Crush) across tmux sessions, you know the pain: constantly switching windows to check which agent finished and is waiting for input. tmux-overmind watches all of them and tells you at a glance.
 
-- **Auto-integrating status indicator**: Works with vanilla tmux AND status bar plugins (tmux-powerline, tmux-powerkit, etc.)
-- **Ultra-compact display**: Shows ○ (no agents/idle), ● (all busy), or ◐ (needs attention)
-- **3-state detection system**:
-  - ● **Running**: Agent is actively working (spinners, processing, etc.)
-  - ◐ **Waiting**: Agent shows prompt, waiting for input (unseen by user)
-  - ○ **Idle**: Agent waiting, but user has already viewed it
-- **Smart prompt detection**: Uses Braille spinners, asterisk spinners, ANSI code stripping, and tool-specific patterns
-- **Spike filtering**: Prevents flickering by requiring multiple state changes in 1 second
-- **Window activity tracking**: Distinguishes between unseen (◐) and seen/idle (○) waiting states
-- **FIFO quick-jump**: Press `prefix + J` to instantly jump to the oldest UNSEEN waiting agent
-- **fzf dashboard**: Press `prefix + O` to see all running agents and their states
-- **Supports**: Claude, OpenCode, Codex, Gemini, Copilot, Crush
+```
+                     ◐            ← an agent needs you
+```
+
+## What it does
+
+A background daemon scrapes every AI agent pane across all your tmux sessions every 2 seconds. It detects whether each agent is actively working or waiting for your input, then surfaces that as:
+
+- **Status bar indicator** — `●` (green, all busy) or `◐` (yellow, needs attention). Hidden when no agents are running.
+- **Floating dashboard** (`prefix + O`) — numbered list of all agents and their state. Type to filter, Enter to switch, Esc to close.
+- **Quick-jump** (`prefix + J`) — instantly switches to the agent that's been waiting the longest (FIFO).
+
+### Status bar
+
+| Indicator | Color | Meaning |
+|:---------:|-------|---------|
+| *(nothing)* | — | No agents detected anywhere |
+| `●` | green | All agents are busy working |
+| `◐` | **yellow, bold** | **At least one agent is waiting for input** |
+
+## Prerequisites
+
+- **tmux 3.2+** — required for `display-popup` (the floating dashboard). Check with `tmux -V`.
+- **[fzf](https://github.com/junegunn/fzf)** — the dashboard uses fzf for fuzzy selection. Install with `brew install fzf` or `apt install fzf`.
+- **bash 4+** — the daemon uses associative arrays. macOS ships bash 3 but Homebrew's bash works (`brew install bash`).
 
 ## Installation
 
-### Using TPM (Tmux Plugin Manager)
+### With TPM (Tmux Plugin Manager)
 
-Add to your `~/.tmux.conf` (order matters - place overmind AFTER other plugins):
+Add to your `~/.tmux.conf`:
 
 ```bash
-# Your other plugins
+# Other plugins...
 set -g @plugin 'tmux-plugins/tpm'
-set -g @plugin 'fabioluciano/tmux-powerkit'
 
-# Add tmux-overmind LAST so it can detect and integrate with other plugins
-set -g @plugin 'yourusername/tmux-overmind'
+# Add tmux-overmind
+set -g @plugin 'oksure/tmux-overmind'
 
+# Keep this line at the very bottom of tmux.conf
 run '~/.tmux/plugins/tpm/tpm'
 ```
 
-Then press `prefix + I` to install.
+Then reload tmux and press `prefix + I` to install.
 
-### Manual Installation
+### Manual
 
 ```bash
-git clone https://github.com/yourusername/tmux-overmind.git ~/.tmux/plugins/tmux-overmind
+git clone https://github.com/oksure/tmux-overmind.git ~/.tmux/plugins/tmux-overmind
 ```
 
-Add to your `~/.tmux.conf` (place AFTER other status bar plugins):
+Add to your `~/.tmux.conf`:
 
 ```bash
 run-shell ~/.tmux/plugins/tmux-overmind/overmind.tmux
 ```
 
-## Configuration
-
-### Status Bar Integration
-
-**By default, tmux-overmind automatically integrates with your existing status bar.** It detects if you have plugins like tmux-powerkit, tmux-powerline, etc., and injects the indicator without breaking your setup.
-
-#### Customization Options
+Then reload:
 
 ```bash
-# Position of the indicator (default: prepend)
-set -g @overmind_status_position 'prepend'  # Options: prepend, append, none
-
-# 'prepend' - puts indicator at the start of status-right (default)
-# 'append'  - puts indicator at the end of status-right
-# 'none'    - disables automatic status integration (manual mode)
+tmux source-file ~/.tmux.conf
 ```
 
-#### Manual Mode (If You Want Full Control)
+## Supported tools
 
-If you set `@overmind_status_position` to `none`, you can manually add the indicator:
+| Tool | Detection method |
+|------|-----------------|
+| [Claude Code](https://github.com/anthropics/claude-code) | Pane title + braille spinner in title |
+| [OpenCode](https://github.com/opencode-ai/opencode) | Process name |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Pane content (runs as `node`) |
+| [Codex CLI](https://github.com/openai/codex) | Pane title (runs as `node`) |
+| [GitHub Copilot CLI](https://githubnext.com/projects/copilot-cli) | Process name |
+| [Crush](https://github.com/crush-ai/crush) | Process name |
 
-```bash
-# In ~/.tmux.conf
-set -g status-right '#(~/.tmux/plugins/tmux-overmind/scripts/status.sh) %H:%M'
-```
+Not all tools show up as their name in `pane_current_command`. Claude Code resolves to a version number on macOS, Gemini and Codex run as `node`. Overmind uses a 3-strategy detection: process name, then pane title, then pane content.
 
-#### Status Bar Plugin Compatibility
-
-| Plugin | Integration Method |
-|--------|-------------------|
-| tmux-powerkit | Detects `@powerkit_theme` and appends to `@powerkit_status_right_area` |
-| tmux-powerline | Direct status-right modification |
-| vanilla tmux | Direct status-right modification |
-| Custom setups | Direct status-right modification |
-
-### Key Bindings
+## Key bindings
 
 | Key | Action |
 |-----|--------|
-| `prefix + O` | Open fzf dashboard with all agents |
-| `prefix + J` | Jump to oldest **unseen** waiting agent (shows ◐) |
+| `prefix + O` | Open floating dashboard |
+| `prefix + J` | Jump to oldest waiting agent |
 
-## How It Works
+## Configuration
 
-The plugin uses a background daemon (`monitor.sh`) that continuously monitors tmux panes:
+```bash
+# Where to place the indicator in status-right (default: prepend)
+set -g @overmind_status_position 'prepend'   # prepend | append | none
+```
 
-1. **Pane Detection**: Identifies AI agents by process name (claude, opencode, codex, gemini, copilot, crush)
-2. **State Detection**: Every 2 seconds:
-   - Captures bottom 5 lines of each agent pane
-   - Strips ANSI escape codes for clean matching
-   - **Priority 1**: Checks for busy indicators (spinners, progress bars, processing text)
-   - **Priority 2**: If not busy, checks for prompt patterns (`>`, `?`, `❯`, `⬝`, confirmations)
-3. **Activity Tracking**: Uses `#{window_activity}` to detect if user has viewed waiting agents
-4. **Spike Filtering**: Requires 2+ state changes in 1 second to prevent flickering
-5. **State Persistence**: Writes to a CSV file that other scripts read
+Set to `none` to disable auto-integration and place it yourself:
 
-The 3-state system (● running, ◐ waiting, ○ idle) provides accurate representation of agent states while avoiding notification fatigue.
+```bash
+set -g @overmind_status_position 'none'
+set -g status-right '#(~/.tmux/plugins/tmux-overmind/scripts/status.sh) %H:%M'
+```
 
-## Requirements
+### tmux-powerkit
 
-- tmux 3.0a or later
-- **fzf** (for the dashboard) - `brew install fzf` or `apt install fzf`
-- bash
+If [tmux-powerkit](https://github.com/oksure/tmux-powerkit) is detected (via `@powerkit_theme`), overmind auto-registers as an external plugin. No extra config needed.
 
-## State Indicators
+## How detection works
 
-| Symbol | Meaning | Details |
-|--------|---------|---------|
-| `○` | No agents / All idle | Either no agents running, or all waiting agents have been viewed by user |
-| `●` | All busy | Agents are actively working (showing spinners, processing, etc.) |
-| `◐` | Needs attention | At least one agent is waiting for input AND the user hasn't viewed it yet |
+**Core principle: prove you're RUNNING, otherwise you're WAITING.**
 
-### How It Works
+Process-level monitoring (`ps`, `lsof`) doesn't work — TUI agents hold the tty in `S+` state even while fetching API responses. The only reliable approach is screen scraping + activity tracking.
 
-The plugin uses a sophisticated detection algorithm:
+An agent is **running** only if we find positive evidence:
 
-1. **Busy Detection** (checked first):
-   - Braille spinners: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
-   - Asterisk spinners: ✳✽✶✢
-   - "ctrl+c to interrupt" text
-   - Processing keywords + ellipsis patterns
+1. **Braille spinner in pane title** — Claude Code puts braille chars (U+2800-U+28FF) in the pane title while actively working. Fastest signal.
 
-2. **Prompt Detection** (if not busy):
-   - Standard prompts: `> `, `? `, `❯`, `⬝`
-   - Confirmation dialogs: `(Y/n)`, `[y/N]`, "Continue?"
-   - Permission dialogs: "Yes, allow once", "No, and tell..."
+2. **`window_activity` changed** — tmux updates this timestamp when a pane produces terminal output. If the timestamp changed since last poll (2s ago), the agent is producing output.
 
-3. **Idle Detection**:
-   - Tracks window activity timestamps
-   - If window was viewed after agent started waiting → shows `○`
-   - Quick-jump only jumps to UNSEEN waiting agents (`◐`)
+3. **Busy indicators in content** — braille spinners, `"ctrl+c to interrupt"`, asterisk spinners with ellipsis (`✳ pondering…`), token counters.
 
-4. **Spike Filtering**:
-   - Requires 2+ state changes in 1 second to prevent flickering
-   - 2-second grace period between state transitions
+4. **Grace period** — 6 seconds after the last busy signal. Covers the brief gap between tool calls where no spinner is visible.
 
-## Troubleshooting
+5. **Startup period** — 4 seconds after first detecting a new agent pane (avoids false "waiting" during initialization).
 
-### Status indicator not showing
+If none of the above are true, the agent is **waiting**.
 
-1. Make sure tmux-overmind is loaded AFTER other status bar plugins in `.tmux.conf`
-2. Check if `@overmind_status_position` is set to `none` (disables auto-integration)
-3. Reload tmux configuration: `prefix + r` or `tmux source-file ~/.tmux.conf`
+### Multi-session
 
-### Duplicate indicators
+Overmind monitors **all tmux sessions**, not just the one where it was loaded. `tmux list-panes -a` covers every pane across every session. The dashboard and quick-jump also work cross-session via `tmux switch-client`.
 
-If you see the indicator twice, you might have both automatic integration enabled AND manually set it in `status-right`. Either:
-- Remove your manual status-right setting, OR
-- Set `set -g @overmind_status_position 'none'` to disable auto-integration
+## File structure
 
-### Using with tmux-powerkit
+```
+tmux-overmind/
+├── overmind.tmux          # Entry point: daemon, bindings, status bar
+├── scripts/
+│   ├── monitor.sh         # Background daemon (2s loop, screen scraping)
+│   ├── status.sh          # ●/◐ for status bar (hidden when no agents)
+│   ├── dashboard.sh       # Floating popup with fzf
+│   └── quick_jump.sh      # FIFO jump to oldest waiting agent
+└── tests/
+    └── test_suite.sh      # Unit tests
+```
 
-If the indicator doesn't appear with tmux-powerkit:
-1. Clear powerkit's cache: Press `prefix + C-d` or run:
-   ```bash
-   tmux run-shell "POWERKIT_ROOT='$HOME/.tmux/plugins/tmux-powerkit' bash -c '. \${POWERKIT_ROOT}/src/core/bootstrap.sh && cache_clear_all && load_powerkit_theme'"
-   ```
-2. Ensure overmind is loaded BEFORE tmux-powerkit initializes in your `.tmux.conf`
+## Uninstall
+
+```bash
+# Kill daemon and clean up
+kill $(cat ${TMPDIR}/tmux-overmind.pid) 2>/dev/null
+rm -f ${TMPDIR}/tmux-overmind.pid ${TMPDIR}/tmux-overmind-state.csv
+tmux unbind-key O; tmux unbind-key J
+```
+
+Then remove the plugin line from `~/.tmux.conf`.
 
 ## License
 
