@@ -27,9 +27,9 @@ while IFS=',' read -r pane_id session_name window_name window_index state timest
 done < "$STATE_FILE"
 
 if ! $has_any; then
-    : # nothing
+    : # nothing — zero output so no whitespace appears in status bar
 elif $has_waiting; then
-    printf '#[fg=colour214,bold]◐#[nobold,fg=default]'
+    printf '#[fg=colour214,bold]◐#[nobold,fg=default] '
 elif $has_running; then
-    printf '#[fg=colour76]●#[fg=default]'
+    printf '#[fg=colour76]●#[fg=default] '
 fi
