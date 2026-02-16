@@ -1,0 +1,57 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    name: Unit Tests
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Run unit test suite
+      run: |
+        chmod +x tests/test_suite.sh
+        ./tests/test_suite.sh
+  
+  shellcheck:
+    runs-on: ubuntu-latest
+    name: ShellCheck
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install ShellCheck
+      run: sudo apt-get update && sudo apt-get install -y shellcheck
+    
+    - name: Run ShellCheck
+      run: |
+        shellcheck --severity=warning scripts/*.sh overmind.tmux || true
+  
+  syntax-check:
+    runs-on: ubuntu-latest
+    name: Syntax Validation
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Check bash syntax
+      run: |
+        bash -n overmind.tmux
+        bash -n scripts/monitor.sh
+        bash -n scripts/status.sh
+        bash -n scripts/dashboard.sh
+        bash -n scripts/quick_jump.sh
+    
+    - name: Verify scripts are executable
+      run: |
+        test -x overmind.tmux
+        test -x scripts/monitor.sh
+        test -x scripts/status.sh
+        test -x scripts/dashboard.sh
+        test -x scripts/quick_jump.sh
