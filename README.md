@@ -10,7 +10,7 @@ If you run multiple AI coding agents (Claude Code, Gemini CLI, OpenCode, Codex, 
 
 ## What it does
 
-A background daemon scrapes every AI agent pane across all your tmux sessions every 2 seconds. It detects whether each agent is actively working or waiting for your input, then surfaces that as:
+A background daemon scrapes every AI agent pane across all your tmux sessions every second. It detects whether each agent is actively working or waiting for your input, then surfaces that as:
 
 - **Status bar indicator** — `●` (green, all busy) or `◐` (yellow, needs attention). Hidden when no agents are running.
 - **Floating dashboard** (`prefix + O`) — numbered list of all agents and their state. Type to filter, Enter to switch, Esc to close.
@@ -115,11 +115,11 @@ An agent is **running** only if we find positive evidence:
 
 1. **Braille spinner in pane title** — Claude Code puts braille chars (U+2800-U+28FF) in the pane title while actively working. Fastest signal.
 
-2. **`window_activity` changed** — tmux updates this timestamp when a pane produces terminal output. If the timestamp changed since last poll (2s ago), the agent is producing output.
+2. **`window_activity` changed** — tmux updates this timestamp when a pane produces terminal output. If the timestamp changed since last poll (1s ago), the agent is producing output.
 
 3. **Busy indicators in content** — braille spinners, `"ctrl+c to interrupt"`, asterisk spinners with ellipsis (`✳ pondering…`), token counters.
 
-4. **Grace period** — 6 seconds after the last busy signal. Covers the brief gap between tool calls where no spinner is visible.
+4. **Grace period** — 3 seconds after the last busy signal. Covers the brief gap between tool calls where no spinner is visible.
 
 5. **Startup period** — 4 seconds after first detecting a new agent pane (avoids false "waiting" during initialization).
 
@@ -135,7 +135,7 @@ Overmind monitors **all tmux sessions**, not just the one where it was loaded. `
 tmux-overmind/
 ├── overmind.tmux          # Entry point: daemon, bindings, status bar
 ├── scripts/
-│   ├── monitor.sh         # Background daemon (2s loop, screen scraping)
+│   ├── monitor.sh         # Background daemon (1s loop, screen scraping)
 │   ├── status.sh          # ●/◐ for status bar (hidden when no agents)
 │   ├── dashboard.sh       # Floating popup with fzf
 │   └── quick_jump.sh      # FIFO jump to oldest waiting agent

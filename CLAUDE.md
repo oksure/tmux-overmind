@@ -6,7 +6,7 @@ tmux-overmind is a tmux plugin that monitors AI coding agents (Claude Code, Open
 
 ## Architecture
 
-Bash-only, TPM-compatible. A background daemon (`monitor.sh`) polls every 2 seconds. No compiled dependencies.
+Bash-only, TPM-compatible. A background daemon (`monitor.sh`) polls every second. No compiled dependencies.
 
 ```
 overmind.tmux  →  starts daemon, sets bindings, integrates status bar
@@ -32,7 +32,7 @@ The default state is **waiting**. An agent is only **running** if we find positi
 1. Braille spinner in `pane_title` (Claude-specific)
 2. `window_activity` changed since last poll (terminal producing output)
 3. Busy indicators in captured content (spinners, "to interrupt", token counters)
-4. Within 6s grace period after any of the above
+4. Within 3s grace period after any of the above
 5. Within 4s startup period for newly-detected panes
 
 This is the opposite of the original spec's approach ("default to running, try to detect waiting") which was fragile and wrong.
