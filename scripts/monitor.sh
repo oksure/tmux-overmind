@@ -137,8 +137,8 @@ monitor_loop() {
     declare -A LAST_BUSY_TIME     # pane_id → epoch when last positively "running"
     declare -A LAST_ACTIVITY      # pane_id → previous window_activity timestamp
     declare -A FIRST_SEEN         # pane_id → epoch when pane was first detected
-    local GRACE_PERIOD=6          # seconds to stay "running" after last busy signal
-    local STARTUP_PERIOD=4        # seconds to assume "running" for newly-detected panes
+    local GRACE_PERIOD=3          # seconds to stay "running" after last busy signal
+    local STARTUP_PERIOD=3        # seconds to assume "running" for newly-detected panes
 
     while true; do
         tmux list-sessions >/dev/null 2>&1 || { sleep 5; continue; }
@@ -236,7 +236,7 @@ ${cursor_line}"
         done <<< "$pane_data"
 
         mv -f "$TEMP_STATE_FILE" "$STATE_FILE"
-        sleep 2
+        sleep 1
     done
 }
 

@@ -97,8 +97,8 @@ integrate_status_bar() {
     # Ensure status bar refreshes often enough (2s)
     local interval
     interval=$(tmux show-option -gqv "status-interval" 2>/dev/null)
-    if [[ -z "$interval" ]] || [[ "$interval" -gt 2 ]]; then
-        tmux set-option -g "status-interval" 2
+    if [[ -z "$interval" ]] || [[ "$interval" -gt 1 ]]; then
+        tmux set-option -g "status-interval" 1
     fi
 }
 
