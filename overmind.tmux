@@ -115,8 +115,8 @@ integrate_status_bar
 
 # Key bindings
 # prefix + A : Dashboard — floating popup with fzf (All agents)
-# prefix + O : Jump to oldest waiting agent (Open waiting)
+# prefix + Z : Jump to oldest waiting agent (Open waiting)
 # prefix + N : Cycle to next agent window (Next agent)
 tmux bind-key A display-popup -E -w 60% -h 40% -T " Overmind " "${CURRENT_DIR}/scripts/dashboard.sh"
-tmux bind-key O run-shell "${CURRENT_DIR}/scripts/quick_jump.sh"
+tmux bind-key Z run-shell "${CURRENT_DIR}/scripts/quick_jump.sh"
 tmux bind-key N run-shell "${CURRENT_DIR}/scripts/cycle.sh"

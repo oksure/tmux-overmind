@@ -13,8 +13,9 @@ If you run multiple AI coding agents (Claude Code, Gemini CLI, OpenCode, Codex, 
 A background daemon scrapes every AI agent pane across all your tmux sessions every second. It detects whether each agent is actively working or waiting for your input, then surfaces that as:
 
 - **Status bar indicator** — `●` (green, all busy) or `◐` (yellow, needs attention). Hidden when no agents are running.
-- **Floating dashboard** (`prefix + O`) — numbered list of all agents and their state. Type to filter, Enter to switch, Esc to close.
-- **Quick-jump** (`prefix + J`) — instantly switches to the agent that's been waiting the longest (FIFO).
+- **Floating dashboard** (`prefix + A`) — numbered list of all agents and their state. Type to filter, Enter to switch, Esc to close.
+- **Quick-jump** (`prefix + Z`) — instantly switches to the agent that's been waiting the longest (FIFO).
+- **Cycle-through** (`prefix + N`) — cycle through all agents in a tmux window across all sessions.
 
 ### Status bar
 
@@ -84,8 +85,9 @@ Not all tools show up as their name in `pane_current_command`. Claude Code resol
 
 | Key | Action |
 |-----|--------|
-| `prefix + O` | Open floating dashboard |
-| `prefix + J` | Jump to oldest waiting agent |
+| `prefix + A` | Open floating dashboard |
+| `prefix + Z` | Jump to oldest waiting agent |
+| `prefix + N` | Cycle through agentic coding windows |
 
 ## Configuration
 
