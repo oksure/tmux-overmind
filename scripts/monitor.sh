@@ -10,13 +10,17 @@
 # Core principle: "Prove you're RUNNING, otherwise you're WAITING."
 #
 # An agent is RUNNING only if we find positive evidence:
-#   1. Braille spinner in pane_title             (Claude sets this while working)
-#   2. window_activity changed since last poll    (terminal is producing output)
-#   3. Busy indicators in pane content            (spinners, "to interrupt", etc.)
-#   4. Within 6s grace period after any of above  (covers tool-call transitions)
+#   1. Braille spinner in pane_title                 (Claude sets this while working)
+#   2. window_activity changed since last poll        (terminal is producing output)
+#      → SUPPRESSED when content positively shows a waiting prompt
+#   3. Busy indicators in pane content               (spinners, "to interrupt", etc.)
+#   4. Within 3s grace period after any of above     (covers tool-call transitions)
+#      → SUPPRESSED when content positively shows a waiting prompt
 #
 # If none of those are true, the agent is WAITING.
-# This eliminates false "running" states for tools we don't have patterns for.
+# Crucially: is_pane_waiting() provides a positive "waiting" signal that overrides
+# the noisy window_activity signal — agents often redraw their prompt, which fires
+# window_activity even when sitting idle at a prompt.
 
 STATE_FILE="${TMPDIR:-/tmp}/tmux-overmind-state.csv"
 TEMP_STATE_FILE="${TMPDIR:-/tmp}/tmux-overmind-state.tmp"
@@ -125,6 +129,48 @@ is_pane_busy() {
     return 1
 }
 
+# ─── Content waiting indicators ──────────────────────────────────────────────
+# POSITIVE EVIDENCE of a waiting/idle state. When found, suppresses the noisy
+# window_activity signal so prompt redraws don't keep an agent stuck at "running".
+
+is_pane_waiting() {
+    local text="$1"
+    local last_line
+    last_line=$(get_last_nonempty_line "$text")
+
+    # Claude Code / generic CLI: last visible line is just the prompt glyph
+    case "$last_line" in
+        ">"*|"❯"*|"$ "*) return 0 ;;
+    esac
+
+    # OpenCode explicit waiting indicators
+    if echo "$text" | grep -qiF 'press enter to send'; then return 0; fi
+    if echo "$text" | grep -qiF 'Ask anything';        then return 0; fi
+
+    # Gemini CLI waiting
+    if echo "$text" | grep -qE 'gemini[>❯]|Type your message'; then return 0; fi
+
+    # Codex waiting
+    if echo "$text" | grep -qF 'codex>'; then return 0; fi
+
+    # Permission / confirmation dialogs (all agents)
+    if echo "$text" | grep -qF 'Yes, allow once';    then return 0; fi
+    if echo "$text" | grep -qF 'Yes, allow always';  then return 0; fi
+    if echo "$text" | grep -qF '(Y/n)';              then return 0; fi
+    if echo "$text" | grep -qF '(y/N)';              then return 0; fi
+    if echo "$text" | grep -qF '[Y/n]';              then return 0; fi
+    if echo "$text" | grep -qF '[y/N]';              then return 0; fi
+    if echo "$text" | grep -qiF 'Do you want to';    then return 0; fi
+    if echo "$text" | grep -qiF 'Run this command';  then return 0; fi
+    if echo "$text" | grep -qiF 'Would you like';    then return 0; fi
+    if echo "$text" | grep -qiF 'Allow this MCP';    then return 0; fi
+
+    # Completion / handoff phrases (agent finished, ball in user's court)
+    if echo "$text" | grep -qiE '(What would you like|What else|Anything else|Let me know if|How can I help)'; then return 0; fi
+
+    return 1
+}
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 get_last_nonempty_line() {
@@ -175,17 +221,28 @@ ${cursor_line}"
                 FIRST_SEEN["$pane_id"]=$CURRENT_TIME
             fi
 
+            # ── Does content positively indicate WAITING? ──
+            # Evaluated first so it can gatekeep noisy signals below.
+            local positively_waiting=false
+            if is_pane_waiting "$clean_text"; then
+                positively_waiting=true
+            fi
+
             # ── Determine: is this pane PROVABLY running? ──
             local is_running=false
 
-            # Signal 1: Braille spinner in pane title (Claude-specific, authoritative)
+            # Signal 1: Braille spinner in pane title (Claude-specific, authoritative).
+            # Not suppressed — a spinner in the title overrides content heuristics.
             if title_has_braille_spinner "$pane_title"; then
                 is_running=true
                 LAST_BUSY_TIME["$pane_id"]=$CURRENT_TIME
             fi
 
-            # Signal 2: window_activity changed since last poll (terminal producing output)
-            if [[ -n "${LAST_ACTIVITY[$pane_id]:-}" ]] && \
+            # Signal 2: window_activity changed since last poll.
+            # SUPPRESSED when we positively see a waiting prompt — agents redraw
+            # their prompt on cursor blinks / scrollback, firing this spuriously.
+            if ! $positively_waiting && \
+               [[ -n "${LAST_ACTIVITY[$pane_id]:-}" ]] && \
                [[ "$win_activity" != "${LAST_ACTIVITY[$pane_id]}" ]]; then
                 is_running=true
                 LAST_BUSY_TIME["$pane_id"]=$CURRENT_TIME
@@ -198,14 +255,19 @@ ${cursor_line}"
                 LAST_BUSY_TIME["$pane_id"]=$CURRENT_TIME
             fi
 
-            # Signal 4: Grace period (6s after last confirmed running)
-            if ! $is_running && [[ -n "${LAST_BUSY_TIME[$pane_id]:-}" ]] && \
+            # Signal 4: Grace period (3s after last confirmed running).
+            # SUPPRESSED when content explicitly shows a waiting prompt — otherwise
+            # a single prompt redraw would extend the grace period indefinitely.
+            if ! $is_running && ! $positively_waiting && \
+               [[ -n "${LAST_BUSY_TIME[$pane_id]:-}" ]] && \
                [[ $((CURRENT_TIME - LAST_BUSY_TIME[$pane_id])) -lt $GRACE_PERIOD ]]; then
                 is_running=true
             fi
 
-            # Signal 5: Startup period (first 4s after detecting a new pane)
-            if ! $is_running && \
+            # Signal 5: Startup period (first N seconds after first detection).
+            # SUPPRESSED if content already shows waiting — some agents open
+            # immediately to a prompt with no work to do.
+            if ! $is_running && ! $positively_waiting && \
                [[ $((CURRENT_TIME - FIRST_SEEN[$pane_id])) -lt $STARTUP_PERIOD ]]; then
                 is_running=true
             fi

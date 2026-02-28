@@ -2,7 +2,9 @@
 
 # tmux-overmind dashboard
 # Runs INSIDE a tmux display-popup. Uses plain fzf.
-# Sorted by pane_id (creation order). Highlights current agent.
+#
+# Sort order: waiting agents first (oldest wait at top), then running (by pane_id).
+# Waiting agents show how long they've been waiting.
 
 STATE_FILE="${TMPDIR:-/tmp}/tmux-overmind-state.csv"
 
@@ -13,93 +15,118 @@ if ! command -v fzf >/dev/null 2>&1; then
 fi
 
 if [[ ! -f "$STATE_FILE" ]] || [[ ! -s "$STATE_FILE" ]]; then
-    echo "No AI agents currently running."
+    echo "No AI agents currently tracked."
     sleep 1
     exit 0
 fi
 
-# Read entries into parallel arrays
-pane_ids=()
-entries=()
+NOW=$(date +%s)
+
+# ── Collect entries into two buckets ──────────────────────────────────────────
+# Each entry: "sort_key|display_text\tswitch_target"
+waiting_rows=()
+running_rows=()
 
 while IFS=',' read -r pane_id session_name window_name window_index state timestamp agent_name || [[ -n "$pane_id" ]]; do
     [[ -z "$pane_id" ]] && continue
-    pane_ids+=("${pane_id#%}")
-    entries+=("${pane_id},${session_name},${window_name},${window_index},${state},${timestamp},${agent_name}")
+
+    switch_target="${session_name}:${window_index}"
+    pane_num="${pane_id#%}"
+
+    case "$state" in
+      waiting)
+        ts="${timestamp:-$NOW}"
+        age=$(( NOW - ts ))
+        # Format age: <60s → "42s", <3600 → "5m12s", else "1h23m"
+        if   [[ $age -lt 60 ]];   then age_str="${age}s"
+        elif [[ $age -lt 3600 ]]; then age_str="$(( age/60 ))m$(( age%60 ))s"
+        else                           age_str="$(( age/3600 ))h$(( (age%3600)/60 ))m"
+        fi
+        display=$(printf "◐  %-12s  waiting %-8s  [%s:%s]" \
+            "$agent_name" "$age_str" "$session_name" "$window_name")
+        # Sort key: timestamp (smaller = older = higher priority)
+        waiting_rows+=("${ts}|${display}"$'\t'"${switch_target}")
+        ;;
+      running)
+        display=$(printf "●  %-12s  running           [%s:%s]" \
+            "$agent_name" "$session_name" "$window_name")
+        # Sort key: pane number (creation order)
+        running_rows+=("${pane_num}|${display}"$'\t'"${switch_target}")
+        ;;
+    esac
 done < "$STATE_FILE"
 
-if [[ ${#pane_ids[@]} -eq 0 ]]; then
-    echo "No AI agents currently running."
+if [[ ${#waiting_rows[@]} -eq 0 && ${#running_rows[@]} -eq 0 ]]; then
+    echo "No AI agents currently tracked."
     sleep 1
     exit 0
 fi
 
-# Sort by pane_id numerically
-sorted_indices=()
-for i in "${!pane_ids[@]}"; do
-    sorted_indices+=("$i")
-done
-IFS=$'\n' sorted_indices=($(for i in "${sorted_indices[@]}"; do echo "${pane_ids[$i]} $i"; done | sort -n | awk '{print $2}'))
+# ── Sort each bucket ──────────────────────────────────────────────────────────
+IFS=$'\n'
+sorted_waiting=($(printf '%s\n' "${waiting_rows[@]}" | sort -t'|' -k1,1n))
+sorted_running=($(printf '%s\n' "${running_rows[@]}" | sort -t'|' -k1,1n))
 unset IFS
 
-# Get current pane_id to highlight
-current_pane=$(tmux display-message -p '#{pane_id}')
-current_num="${current_pane#%}"
-
-# Build display lines
+# ── Build final item list (strip the sort key prefix) ────────────────────────
 items=""
-highlight_pos=0
 count=0
+highlight_pos=0
 
-for idx in "${sorted_indices[@]}"; do
-    IFS=',' read -r pane_id session_name window_name window_index state timestamp agent_name <<< "${entries[$idx]}"
-    count=$((count + 1))
+current_pane=$(tmux display-message -p '#{pane_id}' 2>/dev/null || echo "")
+current_switch="${current_pane}"  # we'll match on switch_target heuristic below
 
-    local_icon=""
-    case "$state" in
-        running) local_icon="●" ;;
-        waiting) local_icon="◐" ;;
-        *)       local_icon="●" ;;
-    esac
+append_row() {
+    local raw="$1"
+    # raw format: "sortkey|display_text\tswitch_target"
+    # strip sortkey prefix (up to first |)
+    local without_key="${raw#*|}"
+    # without_key = "display_text\tswitch_target"
+    local display switch_target
+    display=$(echo "$without_key" | cut -f1)
+    switch_target=$(echo "$without_key" | cut -f2)
 
-    # Check if this is the current pane
-    if [[ "${pane_ids[$idx]}" == "$current_num" ]]; then
-        highlight_pos=$count
-    fi
-
-    line=$(printf "%d  %s %-10s %s [%s:%s]\t%s:%s" \
-        "$count" "$local_icon" "$agent_name" "$state" \
-        "$session_name" "$window_name" \
-        "$session_name" "$window_index")
-
+    count=$(( count + 1 ))
+    local line
+    line=$(printf "%2d  %s\t%s" "$count" "$display" "$switch_target")
     if [[ -z "$items" ]]; then
         items="$line"
     else
-        items="${items}
-${line}"
+        items="${items}"$'\n'"$line"
     fi
+}
+
+# Waiting section header (only if there are waiting agents)
+if [[ ${#sorted_waiting[@]} -gt 0 ]]; then
+    for row in "${sorted_waiting[@]}"; do
+        append_row "$row"
+    done
+fi
+
+for row in "${sorted_running[@]}"; do
+    append_row "$row"
 done
 
-# Build fzf args
+# ── fzf ───────────────────────────────────────────────────────────────────────
+waiting_count=${#sorted_waiting[@]}
+running_count=${#sorted_running[@]}
+header_text="  ${waiting_count} waiting  ${running_count} running   Enter=switch  Esc=close"
+
 fzf_args=(
-    --prompt="  Overmind > "
+    --prompt="  ❯ "
     --reverse
     --no-info
     --no-preview
     --with-nth=1
     --delimiter=$'\t'
-    --header="  Enter=switch  Esc=close"
+    --header="$header_text"
     --header-first
+    --color="hl:214,hl+:214"   # highlight waiting colour (orange)
 )
-
-# Pre-select current agent's position if found
-if [[ $highlight_pos -gt 0 ]]; then
-    fzf_args+=(--bind "start:pos($highlight_pos)")
-fi
 
 selected=$(echo "$items" | fzf "${fzf_args[@]}")
 
 if [[ -n "$selected" ]]; then
-    target=$(echo "$selected" | cut -f2)
+    target=$(echo "$selected" | cut -f3)
     [[ -n "$target" ]] && tmux switch-client -t "$target"
 fi

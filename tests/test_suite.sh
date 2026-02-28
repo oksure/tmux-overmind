@@ -176,6 +176,67 @@ test_title_detection() {
     assert_eq "Empty title → no spinner" "1" "$r"
 }
 
+# ─── Waiting detection tests ──────────────────────────────────────────────────
+# is_pane_waiting() is the primary fix for false-positive "running" states.
+# A positive waiting signal suppresses the noisy window_activity trigger.
+
+test_waiting_detection() {
+    printf "\n${YELLOW}Waiting Detection Tests${NC}\n"
+    source_monitor_functions 2>/dev/null || true
+
+    # Claude Code / generic: last non-empty line is just the prompt glyph
+    is_pane_waiting $'some output\n> ' && r=0 || r=1
+    assert_eq "Last line '>' → waiting" "0" "$r"
+
+    is_pane_waiting $'some output\n❯ ' && r=0 || r=1
+    assert_eq "Last line '❯' → waiting" "0" "$r"
+
+    # OpenCode
+    is_pane_waiting "  press enter to send" && r=0 || r=1
+    assert_eq "OpenCode 'press enter to send' → waiting" "0" "$r"
+
+    is_pane_waiting "  Ask anything" && r=0 || r=1
+    assert_eq "OpenCode 'Ask anything' → waiting" "0" "$r"
+
+    # Gemini
+    is_pane_waiting "gemini>" && r=0 || r=1
+    assert_eq "Gemini prompt 'gemini>' → waiting" "0" "$r"
+
+    # Codex
+    is_pane_waiting "codex>" && r=0 || r=1
+    assert_eq "Codex prompt 'codex>' → waiting" "0" "$r"
+
+    # Permission dialogs
+    is_pane_waiting "  ❯ Yes, allow once" && r=0 || r=1
+    assert_eq "Permission 'Yes, allow once' → waiting" "0" "$r"
+
+    is_pane_waiting "Continue? (Y/n)" && r=0 || r=1
+    assert_eq "Confirm '(Y/n)' → waiting" "0" "$r"
+
+    is_pane_waiting "Would you like to proceed?" && r=0 || r=1
+    assert_eq "'Would you like' → waiting" "0" "$r"
+
+    # Completion phrases
+    is_pane_waiting "Let me know if you need anything else." && r=0 || r=1
+    assert_eq "'Let me know if' → waiting" "0" "$r"
+
+    is_pane_waiting "What else would you like to do?" && r=0 || r=1
+    assert_eq "'What else' → waiting" "0" "$r"
+
+    # Busy content must NOT trigger waiting
+    is_pane_waiting "⠹ Processing files..." && r=0 || r=1
+    assert_eq "Braille spinner content → not waiting" "1" "$r"
+
+    is_pane_waiting "Press ctrl+c to interrupt" && r=0 || r=1
+    assert_eq "'to interrupt' content → not waiting" "1" "$r"
+
+    is_pane_waiting "Working on it" && r=0 || r=1
+    assert_eq "Generic working text → not waiting" "1" "$r"
+
+    is_pane_waiting "" && r=0 || r=1
+    assert_eq "Empty text → not waiting" "1" "$r"
+}
+
 # ─── ANSI stripping tests ────────────────────────────────────────────────────
 
 test_ansi_stripping() {
@@ -347,6 +408,7 @@ test_permissions
 test_status_indicator
 test_busy_detection
 test_title_detection
+test_waiting_detection
 test_ansi_stripping
 test_quick_jump_logic
 test_agent_detection
